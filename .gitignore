@@ -1,0 +1,24 @@
+# virtual environment
+xycad_venv/
+
+# patient data and generated outputs, never committed
+data/
+samples/
+prediction/
+predict/
+demos/*.png
+*.dcm
+*.ima
+*.mat
+
+# personal one-off migration script, points at a local Downloads folder
+copy_and_convert.py
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# editor
+.vscode/
