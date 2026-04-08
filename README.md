@@ -43,6 +43,14 @@ flowchart LR
     D --> E(demo04: texture features)
     B --> F(demo05: density segmentation)
     F --> G(demo06: percent density + BI-RADS)
+    subgraph "master_pipeline.py, one patient folder at a time"
+    B
+    C
+    D
+    E
+    F
+    G
+    end
 ```
 
 <details open>
@@ -121,6 +129,16 @@ python demos/demo06.py --folder "path/to/patient_folder"
 ```
 
 Your own DICOM data stays local. The `samples/`, `data/`, `prediction/`, and `predict/` folders are gitignored on purpose, nothing patient related gets committed.
+
+### Running the full pipeline
+
+Running the six demos by hand against one patient at a time gets old fast. `master_pipeline.py` walks an entire input folder, finds every patient (it groups DICOM-containing view folders like `L MLO`, `R CC`, etc. back up to their parent patient directory automatically), and runs demo01 through demo06 on each one, mirroring the input structure into the output folder:
+
+```bash
+python master_pipeline.py --input "path/to/root/of/patients" --output "path/to/results"
+```
+
+Each patient gets a `demo01/` through `demo06/` subfolder of figures plus a `[PatientID].txt` clinical style density report, and one patient failing (a corrupt DICOM, an unreadable view) doesn't stop the rest of the batch, it gets logged and the run moves on.
 
 ## Project layout
 
