@@ -1,8 +1,10 @@
-<p align="center"><img src="docs/assets/segmentation_example.png" width="380" alt="breast segmentation example"></p>
+<p align="center"><img src="docs/assets/segmentation_example.png" width="360" alt="breast segmentation example"></p>
 
 <h1 align="center">breast-radiomics</h1>
 
-<p align="center">A Python rewrite of the <strong>OpenBreast</strong> MATLAB toolbox for quantitative mammogram analysis: breast segmentation, spatial normalization, ROI selection, radiomic texture features, and morphology based percent density / BI-RADS reporting.</p>
+<p align="center">
+A Python implementation of the <strong>OpenBreast</strong> mammography analysis toolbox (originally MATLAB), covering breast segmentation, spatial normalization, ROI extraction, radiomic texture features, and morphology based breast density / BI-RADS reporting.
+</p>
 
 <p align="center">
 <img alt="python" src="https://img.shields.io/badge/python-3.9%2B-blue">
@@ -11,139 +13,147 @@
 
 ---
 
-## Contents
+## Table of contents
 
-- [What it does](#what-it-does)
-- [Pipeline](#pipeline)
-- [Setup](#setup)
-- [Running it](#running-it)
-- [Project layout](#project-layout)
-- [Status](#status)
+- [Overview](#overview)
+- [Key features](#key-features)
+- [Workflow](#workflow)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Output](#output)
+- [Project structure](#project-structure)
+- [Limitations](#limitations)
 
-## What it does
+## Overview
 
-You give it a folder of DICOM views for one patient (left/right, CC/MLO), and it walks through six stages:
+Mammogram interpretation relies on quantitative measures that are tedious to compute by hand: the breast outline and chest wall position, a normalized coordinate system to compare tissue location across patients, texture statistics over specific regions, and an estimate of how much of the breast is dense fibroglandular tissue versus fat.
 
-1. finds the breast silhouette and chest wall line
-2. warps the breast into a normalized nipple to chest wall coordinate system, so tissue at the "same" anatomical location can be compared across patients regardless of breast size or shape
-3. pulls regions of interest out of that normalized space: the largest inscribed square, a tiled grid of 32x32 patches, and the retroareolar region
-4. computes texture statistics over those regions (gray level co-occurrence, run length, histogram, and fractal dimension features)
-5. segments the dense fibroglandular tissue using a morphological area gradient threshold
-6. rolls the per view results up into a percent density number and a BI-RADS style category (A through D) per breast and per patient
+This project implements that pipeline end to end in Python, starting from raw FFDM DICOM files and ending in a per patient percent density figure and a BI-RADS category (A through D). Each stage was ported directly from the original OpenBreast MATLAB functions, one function at a time, so the underlying math matches the reference implementation.
 
-Every stage has a standalone demo script under [`demos/`](demos/) you can point at a single patient folder, and each one saved a figure so you can actually see what the step produced instead of trusting a number.
+## Key features
 
-## Pipeline
+- Automatic breast silhouette, chest wall, and nipple detection from FFDM DICOM images
+- Spatial normalization into a nipple to chest wall coordinate system, enabling tissue comparison across different breast sizes and shapes
+- Three ROI extraction strategies: largest inscribed square, tiled fixed size patches, and the retroareolar region
+- Over 60 radiomic texture features: GLCM, GLRL, GLHA, GLSM, and fractal dimension, at multiple scales and normalizations
+- Morphological dense tissue segmentation using an area gradient threshold
+- Per breast and per patient percent density aggregation with automatic BI-RADS categorization
+- A single orchestrator script that runs the full pipeline across an entire folder of patients, with per patient error isolation
+
+## Workflow
 
 ```mermaid
-flowchart LR
-    A[DICOM views] --> B(demo01: segmentation)
-    B --> C(demo02: spatial mapping)
-    C --> D(demo03: ROI selection)
-    D --> E(demo04: texture features)
-    B --> F(demo05: density segmentation)
-    F --> G(demo06: percent density + BI-RADS)
-    subgraph "master_pipeline.py, one patient folder at a time"
-    B
-    C
-    D
-    E
-    F
-    G
-    end
+flowchart TD
+    IN(["DICOM views<br/>L/R &middot; CC/MLO"]):::io
+
+    S1["<b>1. Segmentation</b><br/>breast outline, chest wall, nipple"]:::stage
+    S2["<b>2. Spatial mapping</b><br/>nipple&rarr;chest wall normalization"]:::stage
+    S3["<b>3. ROI selection</b><br/>square &middot; tiled &middot; retroareolar"]:::stage
+    S4["<b>4. Texture features</b><br/>GLCM &middot; GLRL &middot; GLHA &middot; GLSM &middot; FDIM"]:::stage
+    S5["<b>5. Density segmentation</b><br/>morphological area gradient"]:::stage
+    S6["<b>6. Density &amp; BI-RADS</b><br/>per breast &middot; per patient report"]:::stage
+
+    OUT(["Feature CSV +<br/>clinical report (.txt)"]):::io
+
+    IN --> S1
+    S1 --> S2 --> S3 --> S4 --> OUT
+    S1 --> S5 --> S6 --> OUT
+
+    classDef io fill:#1f6feb,stroke:#1f6feb,color:#ffffff,font-weight:bold
+    classDef stage fill:#f3f5f8,stroke:#9aa5b1,color:#1a1a1a
 ```
 
-<details open>
-<summary><strong>1. Segmentation</strong> (<code>demo01.py</code>)</summary>
+Stages 1 to 4 (segmentation through texture features) and stages 1, 5, 6 (segmentation through density reporting) can be thought of as two branches off the same breast mask: one characterizes texture, the other characterizes density. `master_pipeline.py` runs both branches, for every view, for every patient, in one pass.
+
+<table>
+<tr>
+<td width="50%">
+
+**1. Segmentation**
 <br>
+<img src="docs/assets/segmentation_example.png" width="100%">
 
-Finds the breast outline, the chest wall (on MLO views), and the nipple position. Everything downstream depends on getting this right.
+</td>
+<td width="50%">
 
-<img src="docs/assets/segmentation_example.png" width="420" alt="segmentation example">
-
-<sub>Figure built from a fabricated test image, not a real mammogram. See <a href="#status">Status</a>.</sub>
-</details>
-
-<details>
-<summary><strong>2. Spatial mapping</strong> (<code>demo02.py</code>)</summary>
+**2. Spatial mapping**
 <br>
+<img src="docs/assets/mapping_example.png" width="100%">
 
-Re-parametrizes the segmented breast into a normalized (s, t) grid running from the nipple to the chest wall, so the same tissue location means the same thing across different breast shapes and sizes.
+</td>
+</tr>
+<tr>
+<td width="50%">
 
-<img src="docs/assets/mapping_example.png" width="640" alt="spatial mapping example">
-</details>
-
-<details>
-<summary><strong>3. ROI selection</strong> (<code>demo03.py</code>)</summary>
+**3. ROI selection**
 <br>
+<img src="docs/assets/roi_example.png" width="100%">
 
-Three ways of picking a region to analyze: the largest square that fits entirely inside the breast, a tiled grid of fixed size patches, and the retroareolar region defined directly in the normalized coordinate space.
+</td>
+<td width="50%">
 
-<img src="docs/assets/roi_example.png" width="700" alt="ROI selection example">
-</details>
-
-<details>
-<summary><strong>4. Texture features</strong> (<code>demo04.py</code>)</summary>
+**5. Density segmentation**
 <br>
+<img src="docs/assets/density_example.png" width="100%">
 
-Extracts gray level co-occurrence (GLCM), run length (GLRL), histogram (GLHA), gray level sum/difference (GLSM), and fractal dimension features at multiple scales and normalizations, and writes them out as a per patient CSV. No figure here, just numbers.
-</details>
+</td>
+</tr>
+</table>
 
-<details>
-<summary><strong>5. Density segmentation</strong> (<code>demo05.py</code>)</summary>
-<br>
+<sub>Figures above were generated from a fabricated test image run through the real pipeline code, not a real mammogram. See <a href="#limitations">Limitations</a>.</sub>
 
-Thresholds dense fibroglandular tissue by finding where the area-vs-intensity curve drops fastest (the morphological area gradient), then cleans the result up with a skin gap erosion and small region removal.
+## Installation
 
-<img src="docs/assets/density_example.png" width="420" alt="density segmentation example">
-</details>
-
-<details>
-<summary><strong>6. Percent density and BI-RADS report</strong> (<code>demo06.py</code>)</summary>
-<br>
-
-Combines the density segmentation across all views of a patient into a per breast and per patient percent density, and buckets it into a BI-RADS category (A: predominantly fatty, through D: extremely dense). Writes a plain text clinical style report per patient.
-</details>
-
-## Setup
-
-Needs Python 3.9+.
+Requires Python 3.9 or newer.
 
 ```bash
+git clone https://github.com/ZainabPervaiz-cloud/breast-radiomics.git
+cd breast-radiomics
 pip install -r requirements.txt
 ```
 
 Core dependencies: `numpy`, `scipy`, `scikit-image`, `pydicom`, `matplotlib`, `opencv-python`.
 
-## Running it
+## Usage
 
-Each demo takes a `--folder` pointing at a directory of DICOM files for one patient and writes its output next to wherever you point `--output` (or the current directory if you don't):
+### Single stage, single patient
+
+Each demo script takes `--folder` (a directory of DICOM files for one patient) and an optional `--output`:
 
 ```bash
-python demos/demo01.py --folder "path/to/patient_folder"
-python demos/demo02.py --folder "path/to/patient_folder"
-python demos/demo03.py --folder "path/to/patient_folder"
-python demos/demo04.py --folder "path/to/patient_folder"
-python demos/demo05.py --folder "path/to/patient_folder"
-python demos/demo06.py --folder "path/to/patient_folder"
+python demos/demo01.py --folder "path/to/patient_folder"   # segmentation
+python demos/demo02.py --folder "path/to/patient_folder"   # spatial mapping
+python demos/demo03.py --folder "path/to/patient_folder"   # ROI selection
+python demos/demo04.py --folder "path/to/patient_folder"   # texture features
+python demos/demo05.py --folder "path/to/patient_folder"   # density segmentation
+python demos/demo06.py --folder "path/to/patient_folder"   # percent density + BI-RADS
 ```
 
-Your own DICOM data stays local. The `samples/`, `data/`, `prediction/`, and `predict/` folders are gitignored on purpose, nothing patient related gets committed.
+### Full pipeline, batch of patients
 
-### Running the full pipeline
-
-Running the six demos by hand against one patient at a time gets old fast. `master_pipeline.py` walks an entire input folder, finds every patient (it groups DICOM-containing view folders like `L MLO`, `R CC`, etc. back up to their parent patient directory automatically), and runs demo01 through demo06 on each one, mirroring the input structure into the output folder:
+`master_pipeline.py` walks an entire input folder, groups DICOM containing view folders (such as `L MLO`, `R CC`) back up to their parent patient directory, and runs demo01 through demo06 for each patient it finds, mirroring the input structure into the output folder:
 
 ```bash
 python master_pipeline.py --input "path/to/root/of/patients" --output "path/to/results"
 ```
 
-Each patient gets a `demo01/` through `demo06/` subfolder of figures plus a `[PatientID].txt` clinical style density report, and one patient failing (a corrupt DICOM, an unreadable view) doesn't stop the rest of the batch, it gets logged and the run moves on.
+One patient failing (a corrupt DICOM, an unreadable view) is caught and logged, and the batch continues with the next patient rather than stopping the run.
 
-## Project layout
+## Output
 
-<details>
-<summary>expand</summary>
+For each patient, the full pipeline produces:
+
+| Path | Contents |
+|---|---|
+| `<output>/<patient_id>/demo01/` | Segmentation figures per view |
+| `<output>/<patient_id>/demo02/` | Spatial mapping figures per view |
+| `<output>/<patient_id>/demo03/` | ROI selection figures per view |
+| `<output>/<patient_id>/demo04/` | `*_features.csv`, consolidated texture features |
+| `<output>/<patient_id>/demo05/` | Density segmentation figures per view |
+| `<output>/<patient_id>/demo06/` | Density/BI-RADS figures per view |
+| `<output>/<patient_id>/<patient_id>.txt` | Clinical style report: per breast and per patient percent density, BI-RADS category |
+
+## Project structure
 
 ```
 misc/          core utilities: DICOM reading, metadata parsing, image normalization
@@ -152,12 +162,11 @@ mapping/       spatial coordinate transforms (forward and inverse)
 density/       morphological dense tissue segmentation
 features/      radiomic texture feature extractors (GLCM, GLRL, GLHA, GLSM, fractal dimension)
 mpatterns/     micro pattern / texton modeling
-demos/         the six standalone, end to end demo scripts described above
+demos/         six standalone, single stage demo scripts
 support/       reference algorithms used internally (largest inscribed square/rectangle, risk assessment plotting)
+master_pipeline.py   orchestrator: runs all six stages across every patient in an input folder
 ```
 
-</details>
+## Limitations
 
-## Status
-
-This is a research port, written by translating the original MATLAB functions one at a time, not a validated or cleared medical device. The figures above come from a fabricated test pattern built specifically for this README, not a real mammogram: the pipeline itself only ever runs on whatever DICOM folder you point it at, and nothing patient related ships in this repo.
+This is a research port, translated function by function from the original MATLAB implementation. It has not been validated against the reference MATLAB outputs, nor against any clinical ground truth, and it is not a cleared or certified medical device. The example figures in this README are generated from a fabricated test pattern built specifically for documentation purposes; no patient data, sample DICOM files, or real mammogram derived images are included anywhere in this repository.
